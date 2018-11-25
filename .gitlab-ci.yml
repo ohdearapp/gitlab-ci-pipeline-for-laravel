@@ -1,0 +1,138 @@
+stages:
+  - preparation
+  - building
+  - testing
+  - security
+
+# Variables
+variables:
+  MYSQL_ROOT_PASSWORD: root
+  MYSQL_USER: mysql_user
+  MYSQL_PASSWORD: mysql_password
+  MYSQL_DATABASE: mysql_db
+  DB_HOST: mysql
+
+cache:
+  key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+
+composer:
+  stage: preparation
+  services:
+    - mysql:5.7
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  script:
+    - php -v
+    - composer install --prefer-dist --no-ansi --no-interaction --no-progress --no-scripts
+    - cp .env.example .env
+    - php artisan key:generate
+  artifacts:
+    paths:
+      - vendor/
+      - .env
+    expire_in: 1 days
+    when: always
+  cache:
+    paths:
+      - vendor/
+
+yarn:
+  stage: preparation
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  script:
+    - yarn --version
+    - yarn install --pure-lockfile
+  artifacts:
+    paths:
+      - node_modules/
+    expire_in: 1 days
+    when: always
+  cache:
+    paths:
+      - node_modules/
+
+build-assets:
+  stage: building
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  # Download the artifacts for these jobs
+  dependencies:
+    - composer
+    - yarn
+  script:
+    - yarn --version
+    - yarn run production --progress false
+  artifacts:
+    paths:
+      - public/css/
+      - public/js/
+      - public/fonts/
+      - public/mix-manifest.json
+    expire_in: 1 days
+    when: always
+
+db-seeding:
+  stage: building
+  services:
+    - mysql:5.7
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  # Download the artifacts for these jobs
+  dependencies:
+    - composer
+    - yarn
+  script:
+    - php artisan migrate:refresh --seed
+  artifacts:
+    paths:
+      - ./storage/logs # for debugging
+    expire_in: 1 days
+    when: on_failure
+
+phpunit:
+  stage: testing
+  services:
+    - mysql:5.7
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  # Download the artifacts for these jobs
+  dependencies:
+    - build-assets
+    - composer
+    - db-seeding
+  script:
+    - php -v
+    - ./vendor/phpunit/phpunit/phpunit --version
+    - php -d short_open_tag=off ./vendor/phpunit/phpunit/phpunit -v --colors=never --stderr
+  artifacts:
+    paths:
+      - ./storage/logs # for debugging
+    expire_in: 1 days
+    when: on_failure
+
+codestyle:
+  stage: testing
+  image: lorisleiva/laravel-docker
+  script:
+    - phpcs --extensions=php app
+  dependencies: []
+
+phpcpd:
+  stage: testing
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  script:
+    - test -f phpcpd.phar || curl -L https://phar.phpunit.de/phpcpd.phar -o phpcpd.phar
+    - php phpcpd.phar app/ --min-lines=50
+  dependencies: []
+  cache:
+    paths:
+      - phpcpd.phar
+
+sensiolabs:
+  stage: security
+  image: edbizarro/gitlab-ci-pipeline-php:7.2
+  script:
+    - git clone https://github.com/sensiolabs/security-checker.git
+    - cd security-checker
+    - composer install
+    - php security-checker security:check ../composer.lock
+  dependencies: []
+  cache:
+    paths:
+      - security-checker/
