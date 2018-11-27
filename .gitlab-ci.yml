@@ -128,7 +128,7 @@ sensiolabs:
   stage: security
   image: edbizarro/gitlab-ci-pipeline-php:7.2
   script:
-    - git clone https://github.com/sensiolabs/security-checker.git
+    - test -d security-checker || git clone https://github.com/sensiolabs/security-checker.git
     - cd security-checker
     - composer install
     - php security-checker security:check ../composer.lock
