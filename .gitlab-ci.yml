@@ -4,6 +4,8 @@ stages:
   - testing
   - security
 
+image: edbizarro/gitlab-ci-pipeline-php:7.3
+
 # Variables
 variables:
   MYSQL_ROOT_PASSWORD: root
@@ -17,9 +19,6 @@ cache:
 
 composer:
   stage: preparation
-  services:
-    - mysql:5.7
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
   script:
     - php -v
     - composer install --prefer-dist --no-ansi --no-interaction --no-progress --no-scripts
@@ -37,7 +36,6 @@ composer:
 
 yarn:
   stage: preparation
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
   script:
     - yarn --version
     - yarn install --pure-lockfile
@@ -52,7 +50,6 @@ yarn:
 
 build-assets:
   stage: building
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
   # Download the artifacts for these jobs
   dependencies:
     - composer
@@ -72,25 +69,28 @@ build-assets:
 db-seeding:
   stage: building
   services:
-    - mysql:5.7
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
+    - name: mysql:8.0
+      command: ["--default-authentication-plugin=mysql_native_password"]
   # Download the artifacts for these jobs
   dependencies:
     - composer
     - yarn
   script:
+    - mysql --version
     - php artisan migrate:fresh --seed
+    - mysqldump --host="${DB_HOST}" --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" > db.sql
   artifacts:
     paths:
-      - ./storage/logs # for debugging
+      - storage/logs # for debugging
+      - db.sql
     expire_in: 1 days
-    when: on_failure
+    when: always
 
 phpunit:
   stage: testing
   services:
-    - mysql:5.7
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
+    - name: mysql:8.0
+      command: ["--default-authentication-plugin=mysql_native_password"]
   # Download the artifacts for these jobs
   dependencies:
     - build-assets
@@ -100,6 +100,7 @@ phpunit:
     - php -v
     - sudo cp /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini /usr/local/etc/php/conf.d/docker-php-ext-xdebug.bak
     - echo "" | sudo tee /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+    - mysql --host="${DB_HOST}" --user="${MYSQL_USER}" --password="${MYSQL_PASSWORD}" "${MYSQL_DATABASE}" < db.sql
     - ./vendor/phpunit/phpunit/phpunit --version
     - php -d short_open_tag=off ./vendor/phpunit/phpunit/phpunit -v --colors=never --stderr
     - sudo cp /usr/local/etc/php/conf.d/docker-php-ext-xdebug.bak /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
@@ -118,7 +119,6 @@ codestyle:
 
 phpcpd:
   stage: testing
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
   script:
     - test -f phpcpd.phar || curl -L https://phar.phpunit.de/phpcpd.phar -o phpcpd.phar
     - php phpcpd.phar app/ --min-lines=50
@@ -129,7 +129,6 @@ phpcpd:
 
 sensiolabs:
   stage: security
-  image: edbizarro/gitlab-ci-pipeline-php:7.2
   script:
     - test -d security-checker || git clone https://github.com/sensiolabs/security-checker.git
     - cd security-checker
